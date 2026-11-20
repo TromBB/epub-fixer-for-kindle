@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EPUB Fixer for Kindle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+/* VOICE: plain, exact, reassuring — a tool that says what it found, what it changed, and proves the rest is untouched.
+   IDEA: a pharmacy dispensing label: the book comes in, gets a diagnosis, a treatment and a signed-off check.
+   PICTURE: the working tool itself — a big emerald drop block beside a pink options block, then a label per book.
+   COLOUR and TYPE: white, emerald #00a86b, pale pink #ffd6e0, black; night #04140d. Schibsted Grotesk 800 + 400.
+   LAYOUT: page cut into rectangles like a medicine box; results are ruled labels in three columns that stack on phones. */
+:root{color-scheme:light dark;
+  --bg:light-dark(#ffffff,#04140d);--ink:light-dark(#0b0b0b,#eef6f1);--muted:light-dark(#4b4f4d,#a9b8b0);
+  --green:#00a86b;--on-green:#03140c;--pink:light-dark(#ffd6e0,#3a1c27);--on-pink:light-dark(#2a0d16,#ffe3ea);
+  --line:light-dark(#0b0b0b,#cfe2d8);--soft:light-dark(#f2f7f4,#0b2219);--bad:light-dark(#b3123b,#ff7d9c);--warn:light-dark(#8a5a00,#f3c25f)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;overflow-x:clip}
+.wrap{max-width:1240px;margin:0 auto;padding:0 max(4vw,16px)}
+header.top{padding:clamp(24px,4vw,48px) 0 clamp(16px,2.5vw,28px)}
+h1{font-weight:800;font-size:clamp(32px,5vw,48px);line-height:1.05;margin:0 0 10px;text-wrap:balance;letter-spacing:-.01em}
+.lede{margin:0;max-width:62ch;color:var(--muted);font-size:17px}
+.box{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);border:2px solid var(--line)}
+.drop{background:var(--green);color:var(--on-green);padding:clamp(24px,4vw,44px);display:flex;flex-direction:column;justify-content:center;gap:14px;min-height:300px;cursor:pointer;position:relative;outline:none;transition:background-color .2s}
+.drop:focus-visible{box-shadow:inset 0 0 0 4px var(--on-green)}
+.drop.over{background:#00c47d}
+.drop svg{width:64px;height:64px;flex:none}
+.drop strong{font-weight:800;font-size:clamp(26px,3.4vw,36px);line-height:1.05}
+.drop span{font-size:16px;max-width:42ch}
+.drop input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 22px;border:2px solid currentColor;border-radius:999px;font:700 16px/1 inherit;font-family:inherit;background:var(--ink);color:var(--bg);cursor:pointer;text-decoration:none}
+.btn:focus-visible{outline:3px solid var(--green);outline-offset:3px}
+.btn.ghost{background:transparent;color:inherit}
+.drop .btn{align-self:flex-start;background:var(--on-green);color:var(--green);border-color:var(--on-green)}
+.opts{background:var(--pink);color:var(--on-pink);padding:clamp(20px,3vw,32px);border-left:2px solid var(--line)}
+.opts h2{font-size:22px;margin:0 0 12px;line-height:1.2}
+.opt{display:grid;grid-template-columns:24px 1fr;gap:4px 12px;padding:10px 0;border-top:1px solid color-mix(in srgb,var(--on-pink) 25%,transparent);cursor:pointer}
+.opt input{width:22px;height:22px;margin:2px 0 0;accent-color:#0b0b0b;cursor:pointer}
+.opt b{font-weight:700}.opt small{grid-column:2;font-size:14px;line-height:1.45;opacity:.85}
+.always{font-size:14px;margin:12px 0 0;line-height:1.45}
+#results{display:grid;gap:22px;padding:28px 0 8px}
+.card{border:2px solid var(--line)}
+.strip{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 16px;padding:14px 18px;background:var(--soft);border-bottom:2px solid var(--line)}
+.strip h3{margin:0;font-size:18px;overflow-wrap:anywhere;font-weight:700}
+.state{font-weight:700;font-size:14px;padding:4px 12px;border-radius:999px;background:var(--ink);color:var(--bg);white-space:nowrap}
+.card.fixed .strip,.card.clean .strip{background:var(--green);color:var(--on-green)}
+.card.fixed .state,.card.clean .state{background:var(--on-green);color:var(--green)}
+.card.failed .strip,.card.error .strip{background:var(--pink);color:var(--on-pink)}
+.verdict{margin:0;padding:16px 18px 0;font-size:22px;font-weight:800;line-height:1.2;text-wrap:balance}
+.facts{margin:6px 18px 0;color:var(--muted);font-size:14px}
+.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin-top:16px;border-top:1px solid var(--line)}
+.col{padding:14px 18px 18px}.col+.col{border-left:1px solid var(--line)}
+.col h4{margin:0 0 8px;font-size:16px;font-weight:800}
+.col ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.col li{display:grid;grid-template-columns:20px 1fr;gap:8px;font-size:15px;line-height:1.45}
+.col li em{font-style:normal;color:var(--muted);font-size:13px;display:block;margin-top:2px}
+.mk{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:800;margin-top:1px;background:var(--ink);color:var(--bg)}
+.mk.p{background:var(--bad);color:#fff}.mk.w{background:var(--warn);color:#fff}.mk.f{background:var(--green);color:var(--on-green)}
+.mk.ok{background:var(--green);color:var(--on-green)}.mk.no{background:var(--bad);color:#fff}
+.none{color:var(--muted);font-size:15px;margin:0}
+.save{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:16px 18px;border-top:2px solid var(--line)}
+.save .msg{font-size:14px;color:var(--muted)}
+.progress{padding:18px;margin:0;font-weight:500}
+.progress::before{content:"";display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--green);margin-right:10px;vertical-align:-1px;animation:pulse 1s ease-in-out infinite alternate}
+@keyframes pulse{to{opacity:.25}}
+.errtext{padding:16px 18px 18px;margin:0;font-size:17px}
+footer{padding:22px 0 40px;color:var(--muted);font-size:14px;line-height:1.55}
+footer p{margin:0 0 6px;max-width:80ch}
+@media(max-width:860px){.cols{grid-template-columns:minmax(0,1fr)}.col+.col{border-left:0;border-top:1px solid var(--line)}}
+@media(max-width:700px){.box{grid-template-columns:minmax(0,1fr)}.opts{border-left:0;border-top:2px solid var(--line)}.drop{min-height:230px}}
+@media(prefers-reduced-motion:reduce){.progress::before{animation:none}.drop{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>EPUB Fixer for Kindle</h1>
+    <p class="lede">Repairs the problems that make Send to Kindle drop a book’s table of contents, then checks the result against your original to prove the text and images haven’t changed.</p>
+  </header>
+
+  <section class="box" aria-label="Fix a book">
+    <label class="drop" id="drop" tabindex="0">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="12" y="6" width="34" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="4"/><path d="M20 18h18M20 26h18M20 34h10" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="46" cy="46" r="13" fill="currentColor"/><path d="M46 39v14M39 46h14" stroke="#00a86b" stroke-width="4" stroke-linecap="round"/></svg>
+      <strong>Drop EPUB files here</strong>
+      <span>Or choose them from your device. Everything runs in this page, and your books never leave your device.</span>
+      <span class="btn" aria-hidden="true">Choose EPUB files</span>
+      <input id="file" type="file" accept=".epub,application/epub+zip" multiple>
+    </label>
+    <div class="opts">
+      <h2>Fixes to apply</h2>
+      <label class="opt"><input type="checkbox" id="opt-upgrade"><b>Upgrade EPUB 2 to EPUB 3</b><small>Adds the navigation file Kindle reads for its table of contents.</small></label>
+      <label class="opt"><input type="checkbox" id="opt-order"><b>Put contents in reading order</b><small>Moves table-of-contents entries listed out of sequence.</small></label>
+      <label class="opt"><input type="checkbox" id="opt-nesting"><b>Fix invalid nesting</b><small>Turns blocks wrapped inside inline text into valid markup that looks the same.</small></label>
+      <p class="always">Always fixed: odd characters in file names, links that don’t exactly match their files, broken or mis-numbered contents entries, and a missing table of contents.</p>
+    </div>
+  </section>
+
+  <section id="results" aria-live="polite"></section>
+
+  <footer>
+    <p>Books with DRM can’t be changed, and this tool won’t try. A book that’s already in good shape is left exactly as it is.</p>
+    <p>The checks are this tool’s own, not Amazon’s converter or the full EPUBCheck validator. They compare every chapter’s text character for character, every image byte for byte, the reading order, the contents entries and the metadata.</p>
+  </footer>
+</div>
+
+<script>
+/* EPUB Fixer engine — no dependencies. EpubFixer.process(bytes, options, onProgress) */
+const EpubFixer = (() => {
+'use strict';
+const NS = {
+  xhtml: 'http://www.w3.org/1999/xhtml', opf: 'http://www.idpf.org/2007/opf',
+  ncx: 'http://www.daisy.org/z3986/2005/ncx/', ops: 'http://www.idpf.org/2007/ops',
+  dc: 'http://purl.org/dc/elements/1.1/', xmlns: 'http://www.w3.org/2000/xmlns/'
+};
+class FixError extends Error {}
+const te = new TextEncoder();
+const tick = () => new Promise(r => setTimeout(r, 0));
+const n$ = (n, one, many) => `${n.toLocaleString('en')} ${n === 1 ? one : (many || one + 's')}`;
+const vb = (n, one, many) => n === 1 ? one : many;
+const XML_DECL = '<?xml version="1.0" encoding="utf-8"?>\n';
+
+/* ---------------- zip ---------------- */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+async function pipe(u8, stream) { return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(stream)).arrayBuffer()); }
+const inflate = u8 => pipe(u8, new DecompressionStream('deflate-raw'));
+const deflate = u8 => pipe(u8, new CompressionStream('deflate-raw'));
+
+function readZip(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new FixError('This file isn’t an EPUB (it isn’t a zip archive).');
+  const count = dv.getUint16(eocd + 10, true), cdOff = dv.getUint32(eocd + 16, true);
+  if (cdOff === 0xFFFFFFFF || count === 0xFFFF) throw new FixError('This EPUB uses the ZIP64 format, which this tool doesn’t support.');
+  const out = []; let p = cdOff;
+  for (let k = 0; k < count; k++) {
+    if (p + 46 > u8.length || dv.getUint32(p, true) !== 0x02014b50) throw new FixError('The EPUB’s zip directory is damaged.');
+    const flags = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true), crc = dv.getUint32(p + 16, true),
+      csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true), nl = dv.getUint16(p + 28, true),
+      xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
+    const nb = u8.subarray(p + 46, p + 46 + nl);
+    let name; try { name = new TextDecoder('utf-8', { fatal: true }).decode(nb); } catch { name = new TextDecoder('windows-1252').decode(nb); }
+    p += 46 + nl + xl + cl;
+    if (dv.getUint32(lho, true) !== 0x04034b50) throw new FixError(`The EPUB’s zip entry for ${name} is damaged.`);
+    const start = lho + 30 + dv.getUint16(lho + 26, true) + dv.getUint16(lho + 28, true);
+    out.push({ name, flags, method, crc, usize, raw: u8.subarray(start, start + csize) });
+  }
+  return out;
+}
+
+async function writeZip(files) {
+  const parts = [], cd = []; let off = 0;
+  const d = new Date();
+  const dtime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const ddate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  for (const f of files) {
+    let method, raw, crc, usize;
+    if (f.reuse) ({ method, raw, crc, usize } = f.reuse);
+    else {
+      usize = f.data.length; crc = crc32(f.data);
+      if (f.store) { method = 0; raw = f.data; }
+      else { const c = await deflate(f.data); if (c.length < f.data.length) { method = 8; raw = c; } else { method = 0; raw = f.data; } }
+    }
+    const nb = te.encode(f.name), utf = /[^\x00-\x7f]/.test(f.name) ? 0x800 : 0, ver = method ? 20 : 10;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, ver, true); lh.setUint16(6, utf, true); lh.setUint16(8, method, true);
+    lh.setUint16(10, dtime, true); lh.setUint16(12, ddate, true); lh.setUint32(14, crc, true);
+    lh.setUint32(18, raw.length, true); lh.setUint32(22, usize, true); lh.setUint16(26, nb.length, true);
+    parts.push(new Uint8Array(lh.buffer), nb, raw);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, ver, true); ch.setUint16(8, utf, true);
+    ch.setUint16(10, method, true); ch.setUint16(12, dtime, true); ch.setUint16(14, ddate, true); ch.setUint32(16, crc, true);
+    ch.setUint32(20, raw.length, true); ch.setUint32(24, usize, true); ch.setUint16(28, nb.length, true); ch.setUint32(42, off, true);
+    cd.push(new Uint8Array(ch.buffer), nb);
+    off += 30 + nb.length + raw.length;
+  }
+  const cdSize = cd.reduce((a, c) => a + c.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+  e.setUint32(12, cdSize, true); e.setUint32(16, off, true);
+  const all = [...parts, ...cd, new Uint8Array(e.buffer)];
+  const out = new Uint8Array(all.reduce((a, c) => a + c.length, 0)); let q = 0;
+  for (const c of all) { out.set(c, q); q += c.length; }
+  return out;
+}
+
+/* ---------------- text, XML, paths ---------------- */
+const MARKUP = /\.(xhtml|html|htm|xml|opf|ncx|svg|smil)$/i, CSSX = /\.css$/i, XHTMLX = /\.(xhtml|html|htm)$/i;
+function decodeText(u8) {
+  let enc = 'utf-8';
+  if (u8[0] === 0xFF && u8[1] === 0xFE) enc = 'utf-16le';
+  else if (u8[0] === 0xFE && u8[1] === 0xFF) enc = 'utf-16be';
+  else {
+    const head = new TextDecoder('windows-1252').decode(u8.subarray(0, 240));
+    const m = head.match(/^﻿?\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']/i) || head.match(/^﻿?\s*@charset\s+["']([^"']+)["']/i);
+    if (m) enc = m[1].toLowerCase();
+  }
+  try { return { text: new TextDecoder(enc, { fatal: true }).decode(u8), enc }; }
+  catch { return { text: new TextDecoder('utf-8').decode(u8), enc: 'utf-8', lossy: true }; }
+}
+async function loadBook(u8) {
+  const entries = readZip(u8);
+  const files = new Map(), order = [];
+  for (const e of entries) {
+    if (e.name.endsWith('/')) continue;
+    if (e.flags & 1) throw new FixError('This EPUB’s zip file is password-protected, so it can’t be processed.');
+    let data;
+    if (e.method === 0) data = e.raw; else if (e.method === 8) data = await inflate(e.raw);
+    else throw new FixError(`${e.name} uses a compression method this tool can’t read.`);
+    const f = { name: e.name, entry: e, data, crcOk: crc32(data) === e.crc, kind: MARKUP.test(e.name) ? 'markup' : CSSX.test(e.name) ? 'css' : 'binary' };
+    if (f.kind !== 'binary') Object.assign(f, decodeText(data));
+    if (!files.has(e.name)) order.push(e.name);
+    files.set(e.name, f);
+  }
+  return { entries: entries.filter(e => !e.name.endsWith('/')), files, order };
+}
+const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+const isExternal = r => /^[a-z][a-z0-9+.-]*:/i.test(r) || r.startsWith('//');
+const safeSeg = s => /^[A-Za-z0-9._-]+$/.test(s);
+const isMetaInf = n => n === 'mimetype' || /^META-INF\//i.test(n);
+const dirOf = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '';
+function normPath(p) { const o = []; for (const s of p.split('/')) { if (s === '' || s === '.') continue; if (s === '..') o.pop(); else o.push(s); } return o.join('/'); }
+const resolvePath = (from, ref) => ref.startsWith('/') ? normPath(ref) : normPath(dirOf(from) + ref);
+function relPath(from, to) {
+  const a = dirOf(from).split('/').filter(Boolean), b = to.split('/'); let i = 0;
+  while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+  return '../'.repeat(a.length - i) + b.slice(i).join('/');
+}
+const encodePath = p => p.split('/').map(s => s === '..' ? s : encodeURIComponent(s)).join('/');
+function sanitizeSeg(s) {
+  const dot = s.lastIndexOf('.');
+  let base = dot > 0 ? s.slice(0, dot) : s, ext = dot > 0 ? s.slice(dot) : '';
+  base = base.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'file';
+  ext = ext.replace(/[^A-Za-z0-9.]/g, '');
+  return base + ext;
+}
+function makeLookup(names) {
+  const exact = new Set(names), loose = new Map();
+  for (const n of names) loose.set(n.normalize('NFC').toLowerCase(), n);
+  return (path, strict) => {
+    if (exact.has(path)) return { name: path, how: 'exact' };
+    if (strict) return null;
+    const d = safeDecode(path);
+    if (exact.has(d)) return { name: d, how: 'escaped' };
+    const l = loose.get(d.normalize('NFC').toLowerCase());
+    return l ? { name: l, how: 'case' } : null;
+  };
+}
+const XML_ENT = new Set(['amp', 'lt', 'gt', 'quot', 'apos']), entCache = new Map();
+function entityText(name) {
+  if (!entCache.has(name)) {
+    const d = new DOMParser().parseFromString(`<!DOCTYPE html><body>&${name};</body>`, 'text/html').body.textContent;
+    entCache.set(name, d === `&${name};` ? null : d);
+  }
+  return entCache.get(name);
+}
+const numericEntities = text => text.split(/(<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->)/).map((part, i) => i % 2 ? part :
+  part.replace(/&([A-Za-z][A-Za-z0-9]{1,31});/g, (m, n) => {
+    if (XML_ENT.has(n)) return m; const d = entityText(n);
+    return d == null ? m : Array.from(d, c => `&#${c.codePointAt(0)};`).join('');
+  })).join('');
+const DOCTYPE_RE = /<!DOCTYPE[^>\[]*(\[[\s\S]*?\])?\s*>/i;
+function parseXml(text, mime = 'application/xml') {
+  const doc = new DOMParser().parseFromString(text, mime);
+  return doc.getElementsByTagNameNS('*', 'parsererror').length ? null : doc;
+}
+const analysisDoc = (text, xhtml) => parseXml(numericEntities(text.replace(/^﻿/, '')).replace(DOCTYPE_RE, ''), xhtml ? 'application/xhtml+xml' : 'application/xml');
+const serialize = el => new XMLSerializer().serializeToString(el).replace(/^<\?xml[^>]*\?>\s*/, '');
+const xmlUnesc = s => s.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (m, e) => e[0] === '#'
+  ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10))
+  : { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[e.toLowerCase()]);
+const xmlEsc = (s, q = '"') => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(q === '"' ? /"/g : /'/g, q === '"' ? '&quot;' : '&apos;');
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const kids = (el, name) => [...el.children].filter(c => c.localName === name);
+
+/* ---------------- reference rewriting ---------------- */
+const TAG_RE = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!DOCTYPE[^>\[]*(?:\[[\s\S]*?\])?\s*>|<[A-Za-z_][^\s\/>]*(?:\s+[^\s=\/>]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*\s*\/?>/g;
+const ATTR_RE = /(\s)([^\s=\/>]+)(\s*=\s*)("([^"]*)"|'([^']*)')/g;
+const isRefAttr = n => n === 'href' || n === 'src' || n.endsWith(':href') || n === 'poster' || n === 'data' || n === 'altimg';
+function rewriteCss(css, map) {
+  return css.replace(/(url\(\s*)(["']?)([^"')]*?)\2(\s*\))/gi, (m, a, q, u, b) => { const r = map(u.trim()); return r === null || r === u.trim() ? m : a + q + r + q + b; })
+    .replace(/(@import\s+)(["'])([^"']+)\2/gi, (m, a, q, u) => { const r = map(u); return r === null || r === u ? m : a + q + r + q; });
+}
+function rewriteMarkup(text, map) {
+  return text.replace(TAG_RE, tag => {
+    if (tag[1] === '!' || tag[1] === '?') return tag;
+    return tag.replace(ATTR_RE, (m, sp, name, eq, quoted, v1, v2) => {
+      const q = quoted[0], raw = v1 !== undefined ? v1 : v2, ln = name.toLowerCase();
+      let nv = null;
+      if (isRefAttr(ln)) { const val = xmlUnesc(raw), r = map(val); if (r !== null && r !== val) nv = r; }
+      else if (ln === 'style' && /url\(/i.test(raw)) { const val = xmlUnesc(raw), r = rewriteCss(val, map); if (r !== val) nv = r; }
+      return nv === null ? m : sp + name + eq + q + xmlEsc(nv, q) + q;
+    });
+  }).replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style\s*>)/gi, (m, a, css, b) => a + rewriteCss(css, map) + b);
+}
+const splitRef = v => { const i = v.search(/[?#]/); return i < 0 ? [v, ''] : [v.slice(0, i), v.slice(i)]; };
+function target(from, href, lookup, strict) {
+  if (!href || isExternal(href)) return { file: null, frag: null };
+  const i = href.indexOf('#'), p = i < 0 ? href : href.slice(0, i), frag = i < 0 ? null : href.slice(i + 1) || null;
+  const hit = p ? lookup(resolvePath(from, p.split('?')[0]), strict) : { name: from };
+  return { file: hit ? hit.name : null, frag };
+}
+const idCacheFor = getText => { const cache = new Map(); return path => {
+  if (!cache.has(path)) { const m = new Map(), t = getText(path); if (t) for (const x of t.matchAll(/\s(?:id|name)\s*=\s*["']([^"']+)["']/g)) if (!m.has(x[1])) m.set(x[1], x.index); cache.set(path, m); }
+  return cache.get(path); }; };
+
+/* ---------------- TOC helpers ---------------- */
+function readNcx(doc, path, lookup, strict) {
+  const navMap = doc.getElementsByTagNameNS(NS.ncx, 'navMap')[0]; if (!navMap) return [];
+  const walk = el => kids(el, 'navPoint').map(np => {
+    const lab = kids(np, 'navLabel')[0], c = kids(np, 'content')[0], src = c ? c.getAttribute('src') || '' : '';
+    const txt = lab ? (kids(lab, 'text')[0] || lab).textContent : '';
+    return { ...target(path, src, lookup, strict), label: txt.replace(/\s+/g, ' ').trim(), href: src, playOrder: np.getAttribute('playOrder'), kids: walk(np) };
+  });
+  return walk(navMap);
+}
+function tocNav(doc) { return [...doc.getElementsByTagNameNS(NS.xhtml, 'nav')].find(n => /(^|\s)toc(\s|$)/.test(n.getAttributeNS(NS.ops, 'type') || n.getAttribute('epub:type') || '')); }
+function readNav(doc, path, lookup, strict) {
+  const nav = tocNav(doc); if (!nav) return null;
+  const ol = kids(nav, 'ol')[0]; if (!ol) return [];
+  const walk = ol => kids(ol, 'li').map(li => {
+    const a = [...li.children].find(c => c.localName === 'a' || c.localName === 'span'), sub = kids(li, 'ol')[0];
+    const href = a && a.localName === 'a' ? a.getAttribute('href') : null;
+    return { ...(href ? target(path, href, lookup, strict) : { file: null, frag: null }), href, label: (a ? a.textContent : '').replace(/\s+/g, ' ').trim(), kids: sub ? walk(sub) : [] };
+  });
+  return walk(ol);
+}
+const countT = t => t ? t.reduce((a, n) => a + 1 + countT(n.kids), 0) : 0;
+const validT = t => t ? t.reduce((a, n) => a + (n.file ? 1 : 0) + validT(n.kids), 0) : 0;
+const flatT = (t, out = []) => { for (const n of t || []) { out.push(n); flatT(n.kids, out); } return out; };
+const depthT = t => t.length ? 1 + Math.max(...t.map(n => depthT(n.kids))) : 0;
+const firstTarget = n => n.file ? n : n.kids.length ? firstTarget(n.kids[0]) : null;
+const lt = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+/* NCX playOrder rule: one number per destination, numbers rising in reading order */
+function playOrderOk(flat, pos, idsOf) {
+  const byKey = new Map(), byNum = new Map();
+  for (const n of flat) {
+    const po = parseInt(n.playOrder, 10); if (!(po > 0)) return false;
+    const k = `${n.file}#${n.frag}`;
+    if (byKey.has(k) && byKey.get(k) !== po) return false;
+    if (byNum.has(po) && byNum.get(po) !== k) return false;
+    byKey.set(k, po); byNum.set(po, k);
+  }
+  const placed = [...byKey].map(([k, po]) => { const [f, fr] = k.split('#'); return pos.has(f) ? [[pos.get(f), fr !== 'null' ? (idsOf(f).get(fr) || 0) : 0], po] : null; }).filter(Boolean);
+  placed.sort((a, b) => lt(a[0], b[0]) ? -1 : lt(b[0], a[0]) ? 1 : 0);
+  return placed.every((x, i) => !i || x[1] > placed[i - 1][1] || !lt(placed[i - 1][0], x[0]));
+}
+function orderTools(pos, idsOf) {
+  const key = n => { const t = firstTarget(n); return t && pos.has(t.file) ? [pos.get(t.file), t.frag ? (idsOf(t.file).get(t.frag) || 0) : 0] : null; };
+  const outOfOrder = nodes => { let c = 0; const ks = nodes.map(key); for (let i = 1; i < ks.length; i++) if (ks[i] && ks[i - 1] && lt(ks[i], ks[i - 1])) c++; return c + nodes.reduce((a, n) => a + outOfOrder(n.kids), 0); };
+  const sortT = nodes => {
+    nodes.forEach(n => sortT(n.kids));
+    const ks = nodes.map((n, i) => [key(n), i, n]); if (ks.some(k => !k[0])) return;
+    ks.sort((a, b) => lt(a[0], b[0]) ? -1 : lt(b[0], a[0]) ? 1 : a[1] - b[1]);
+    nodes.splice(0, nodes.length, ...ks.map(k => k[2]));
+  };
+  return { key, outOfOrder, sortT };
+}
+const hrefTo = (from, n) => encodePath(relPath(from, n.file)) + (n.frag ? '#' + n.frag : '');
+function navOl(nodes, from, ind) {
+  return `${ind}<ol>\n` + nodes.map(n => {
+    const t = n.file ? n : null;
+    const lab = t ? `<a href="${esc(hrefTo(from, t))}">${esc(n.label)}</a>` : `<span>${esc(n.label)}</span>`;
+    return `${ind}  <li>${lab}${n.kids.length ? '\n' + navOl(n.kids, from, ind + '    ') + ind + '  ' : ''}</li>\n`;
+  }).join('') + `${ind}</ol>\n`;
+}
+const GUIDE2LM = { cover: 'cover', 'title-page': 'titlepage', toc: 'toc', text: 'bodymatter', start: 'bodymatter', 'copyright-page': 'copyright-page', dedication: 'dedication', epigraph: 'epigraph', foreword: 'foreword', preface: 'preface', acknowledgements: 'acknowledgments', glossary: 'glossary', bibliography: 'bibliography', index: 'index', colophon: 'colophon', loi: 'loi', lot: 'lot' };
+
+/* ---------------- nesting fix ---------------- */
+const PHR = new Set('span em strong i b small sub sup cite code abbr q u s label font big tt dfn kbd samp var mark time bdo bdi p h1 h2 h3 h4 h5 h6'.split(' '));
+const TRANSPARENT = new Set(['a', 'ins', 'del', 'map', 'noscript']);
+const BLK = new Set('address article aside blockquote details dialog dl fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hgroup hr main nav ol p pre section table ul li div'.split(' '));
+function nestedDivs(doc, apply) {
+  let fixed = 0, left = 0;
+  for (const d of [...doc.getElementsByTagNameNS(NS.xhtml, 'div')].reverse()) {
+    let p = d.parentNode; while (p && p.nodeType === 1 && TRANSPARENT.has(p.localName)) p = p.parentNode;
+    if (!p || p.nodeType !== 1 || p.namespaceURI !== NS.xhtml || !PHR.has(p.localName)) continue;
+    if ([...d.getElementsByTagNameNS(NS.xhtml, '*')].some(e => BLK.has(e.localName))) { left++; continue; }
+    fixed++;
+    if (!apply) continue;
+    const s = doc.createElementNS(NS.xhtml, 'span');
+    for (const a of [...d.attributes]) s.setAttributeNS(a.namespaceURI, a.name, a.value);
+    const st = (d.getAttribute('style') || '').trim().replace(/;\s*$/, '');
+    s.setAttribute('style', (st ? st + '; ' : '') + 'display: block');
+    while (d.firstChild) s.appendChild(d.firstChild);
+    d.parentNode.replaceChild(s, d);
+  }
+  return { fixed, left };
+}
+function cssUsesTypes(css, names) {
+  const re = new RegExp(`(^|[\\s,>+~(])(${names.join('|')})(?![\\w-])`, 'i');
+  return (css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+(?=\{)/g) || []).some(sel => !/^\s*@/.test(sel) && re.test(sel));
+}
+
+/* ================= main ================= */
+async function process(input, options = {}, progress = () => {}) {
+  const opts = { upgrade: true, order: true, nesting: true, ...options };
+  const R = { found: [], fixes: [], checks: [], info: {} };
+  const found = (sev, text) => R.found.push({ sev, text }), fix = text => R.fixes.push(text);
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  progress('Reading the book'); await tick();
+  const orig = await loadBook(bytes), F = orig.files;
+  const find = n => orig.order.find(k => k.toLowerCase() === n.toLowerCase());
+  if ([...F.values()].some(f => !f.crcOk)) found('warning', 'Some files inside the EPUB fail their checksum, so the download may be damaged.');
+
+  // DRM / encryption
+  const DRM = 'This book is DRM-protected, so it can’t be changed. Only DRM-free EPUBs can be fixed.';
+  if (find('META-INF/rights.xml') || find('META-INF/sinf.xml')) throw new FixError(DRM);
+  const encName = find('META-INF/encryption.xml');
+  if (encName) {
+    const algs = [...F.get(encName).text.matchAll(/<(?:\w+:)?EncryptionMethod[^>]*Algorithm\s*=\s*["']([^"']+)["']/g)].map(m => m[1]);
+    if (algs.some(a => a !== 'http://www.idpf.org/2008/embedding' && a !== 'http://ns.adobe.com/pdf/enc#RC')) throw new FixError(DRM);
+  }
+
+  // mimetype
+  const mt = F.get('mimetype'), firstEntry = orig.entries[0];
+  const mimeOk = mt && firstEntry.name === 'mimetype' && firstEntry.method === 0 && new TextDecoder().decode(mt.data) === 'application/epub+zip';
+  if (!mimeOk) found('problem', 'The required “mimetype” file is missing or not stored the way the EPUB format requires.');
+
+  // container → package
+  const lookupOld = makeLookup(orig.order);
+  const contName = find('META-INF/container.xml');
+  let opfOld = null, containerFix = false;
+  if (contName) {
+    const m = F.get(contName).text.match(/full-path\s*=\s*["']([^"']+)["']/);
+    const hit = m && lookupOld(xmlUnesc(m[1]));
+    if (hit) { opfOld = hit.name; if (hit.how !== 'exact' || contName !== 'META-INF/container.xml') containerFix = true; }
+  }
+  if (!opfOld) {
+    opfOld = orig.order.find(k => /\.opf$/i.test(k));
+    if (!opfOld) throw new FixError('There’s no package file (.opf) inside, so this doesn’t look like an EPUB.');
+    found('problem', 'The container file doesn’t point to the book’s package file.'); containerFix = true;
+  }
+  const opf0 = analysisDoc(F.get(opfOld).text, false);
+  if (!opf0) throw new FixError('The book’s package file (.opf) is malformed, so it can’t be repaired automatically.');
+  const version = (opf0.documentElement.getAttribute('version') || '2.0').trim();
+  const wasV2 = !version.startsWith('3'), outV3 = !wasV2 || opts.upgrade;
+  R.info.version = version;
+
+  // renames
+  progress('Checking file names and links'); await tick();
+  const renames = new Map(), taken = new Set(), badChars = new Set();
+  for (const n of orig.order) if (isMetaInf(n) || n.split('/').every(safeSeg)) taken.add(n.toLowerCase());
+  for (const n of orig.order) {
+    if (isMetaInf(n) || n.split('/').every(safeSeg)) continue;
+    for (const ch of n.replace(/[A-Za-z0-9._\/-]/g, '')) badChars.add(ch === ' ' ? 'spaces' : ch);
+    let cand = n.split('/').map(sanitizeSeg).join('/');
+    const dot = cand.lastIndexOf('.'), sl = cand.lastIndexOf('/'), stem = dot > sl ? cand.slice(0, dot) : cand, ext = dot > sl ? cand.slice(dot) : '';
+    for (let k = 2; taken.has(cand.toLowerCase()); k++) cand = `${stem}_${k}${ext}`;
+    taken.add(cand.toLowerCase()); renames.set(n, cand);
+  }
+  const newName = n => renames.get(n) || n;
+  if (renames.size) {
+    found('problem', `${n$(renames.size, 'file name')} contain${renames.size === 1 ? 's' : ''} characters that ebook converters often mishandle (${[...badChars].slice(0, 6).map(c => c === 'spaces' ? c : `“${c}”`).join(', ')}).`);
+    fix(`Renamed ${n$(renames.size, 'file')} to ${vb(renames.size, 'a plain name', 'plain names')}`);
+  }
+
+  // rewrite every reference
+  const ctx = { broken: [], stats: { escaped: 0, case: 0, renamed: 0, moved: 0 } };
+  const mapper = (fromOld, fromNew, rootRel) => val => {
+    if (!val || isExternal(val) || val[0] === '#') return null;
+    const [p, suffix] = splitRef(val); if (!p) return null;
+    const hit = lookupOld(rootRel ? normPath(p) : resolvePath(fromOld, p));
+    if (!hit) { ctx.broken.push({ file: fromOld, ref: val }); return null; }
+    if (hit.how === 'escaped' && !ctx.example) { const m = p.match(/(?:%[0-9A-Fa-f]{2})+/); if (m) ctx.example = [m[0], safeDecode(m[0])]; }
+    const tgt = newName(hit.name), moved = !rootRel && fromOld !== fromNew && dirOf(fromOld) !== dirOf(fromNew);
+    if (hit.how === 'exact' && tgt === hit.name && !moved) return null;
+    const out = encodePath(rootRel ? tgt : relPath(fromNew, tgt)) + suffix;
+    if (out !== val) ctx.stats[hit.how !== 'exact' ? hit.how : tgt !== hit.name ? 'renamed' : 'moved']++;
+    return out;
+  };
+  const T = new Map(); let lossy = 0;
+  for (const n of orig.order) {
+    const f = F.get(n); if (f.kind === 'binary') continue;
+    const nn = newName(n);
+    let t = f.text;
+    if (f.lossy) lossy++;
+    else if (n === encName) t = t.replace(/(\bURI\s*=\s*)(["'])([^"']*)\2/g, (m, a, q, v) => { const r = mapper(n, n, true)(xmlUnesc(v)); return r === null ? m : a + q + xmlEsc(r, q) + q; });
+    else if (isMetaInf(n)) { /* other META-INF files have no book links */ }
+    else t = f.kind === 'markup' ? rewriteMarkup(t, mapper(n, nn)) : rewriteCss(t, mapper(n, nn));
+    T.set(nn, { text: t, enc: f.enc, lossy: f.lossy, changed: t !== f.text, old: n });
+  }
+  if (lossy) found('warning', `${n$(lossy, 'text file')} ${vb(lossy, 'uses an unreadable character encoding and was', 'use an unreadable character encoding and were')} left untouched.`);
+  const opfNew = newName(opfOld);
+  if (containerFix || opfNew !== opfOld) {
+    T.set('META-INF/container.xml', { text: `<?xml version="1.0" encoding="UTF-8"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n  <rootfiles>\n    <rootfile full-path="${esc(opfNew)}" media-type="application/oebps-package+xml"/>\n  </rootfiles>\n</container>\n`, changed: true, old: contName });
+    if (containerFix) fix('Repaired the container file so it points to the package file');
+  }
+  const S = ctx.stats;
+  if (S.escaped) { const ex = ctx.example ? ` (here “${ctx.example[0]}” stands for ${ctx.example[1] === ' ' ? 'a space' : `“${ctx.example[1]}”`})` : ''; found('problem', `${n$(S.escaped, 'link')} ${vb(S.escaped, 'spells a file name', 'spell file names')} with %-codes${ex} that don’t exactly match the real ${vb(S.escaped, 'file', 'files')}. This is a common reason Send to Kindle drops the table of contents.`); }
+  if (S.case) found('problem', `${n$(S.case, 'link')} ${vb(S.case, 'uses', 'use')} the wrong upper/lower case for a file name.`);
+  const linkFixes = S.escaped + S.case + S.renamed + S.moved;
+  if (linkFixes) fix(`Rewrote ${n$(linkFixes, 'link')} so each one exactly matches its file`);
+  if (ctx.broken.length) found('warning', `${n$(ctx.broken.length, 'link')} ${vb(ctx.broken.length, 'points to a file that isn’t in the book. It was already broken and is left as it was.', 'point to files that aren’t in the book. They were already broken and are left as they were.')}`);
+
+  // package DOM (new names)
+  const opfT = T.get(opfNew), opf = analysisDoc(opfT.text, false), pkg = opf.documentElement;
+  let opfDirty = false;
+  const manifestEl = opf.getElementsByTagNameNS(NS.opf, 'manifest')[0], spineEl = opf.getElementsByTagNameNS(NS.opf, 'spine')[0];
+  if (!manifestEl || !spineEl) throw new FixError('The package file has no manifest or spine, so the book can’t be read.');
+  const newNames = [...new Set(orig.order.map(newName))], lookupNew = makeLookup(newNames);
+  const items = new Map(), ids = new Set([...opf.getElementsByTagNameNS('*', '*')].map(e => e.getAttribute('id')).filter(Boolean));
+  const uniqueId = base => { let id = base; for (let k = 2; ids.has(id); k++) id = base + '-' + k; ids.add(id); return id; };
+  const missing = [];
+  for (const el of kids(manifestEl, 'item')) {
+    const href = el.getAttribute('href') || '', hit = lookupNew(resolvePath(opfNew, splitRef(href)[0]), true) || lookupNew(resolvePath(opfNew, safeDecode(splitRef(href)[0])), true);
+    if (!hit) { missing.push(href); el.parentNode.removeChild(el); opfDirty = true; continue; }
+    items.set(el.getAttribute('id'), { id: el.getAttribute('id'), el, path: hit.name, mt: (el.getAttribute('media-type') || '').trim(), props: new Set((el.getAttribute('properties') || '').split(/\s+/).filter(Boolean)) });
+  }
+  const setProps = it => { if (it.props.size) it.el.setAttribute('properties', [...it.props].join(' ')); else it.el.removeAttribute('properties'); opfDirty = true; };
+  const spine = []; let badSpine = 0;
+  for (const ir of kids(spineEl, 'itemref')) { const it = items.get(ir.getAttribute('idref')); if (!it) { ir.parentNode.removeChild(ir); badSpine++; opfDirty = true; continue; } spine.push(it.path); }
+  if (missing.length) { found('problem', `${n$(missing.length, 'listed file')} ${missing.length === 1 ? 'is' : 'are'} missing from the archive.`); fix(`Removed ${n$(missing.length, 'package entry', 'package entries')} for files that don’t exist`); }
+  if (badSpine) { found('problem', `${n$(badSpine, 'reading-order entry', 'reading-order entries')} ${vb(badSpine, 'points', 'point')} to nothing.`); fix(`Removed ${n$(badSpine, 'empty reading-order entry', 'empty reading-order entries')}`); }
+  const pos = new Map(spine.map((p, i) => [p, i]));
+  const idsOf = idCacheFor(p => T.get(p) && T.get(p).text);
+  const OT = orderTools(pos, idsOf);
+  const uidEl = [...opf.getElementsByTagNameNS(NS.dc, 'identifier')].find(e => e.getAttribute('id') === pkg.getAttribute('unique-identifier')) || opf.getElementsByTagNameNS(NS.dc, 'identifier')[0];
+  const uid = uidEl ? uidEl.textContent.trim() : '';
+  const title = (opf.getElementsByTagNameNS(NS.dc, 'title')[0] || {}).textContent || 'Untitled';
+  const lang = ((opf.getElementsByTagNameNS(NS.dc, 'language')[0] || {}).textContent || 'en').trim();
+  if (!opf.getElementsByTagNameNS(NS.dc, 'language').length) found('warning', 'The book doesn’t declare its language; Send to Kindle may reject it.');
+
+  // ---- table of contents: sources
+  progress('Checking the table of contents'); await tick();
+  let ncxItem = null; const tocAttr = spineEl.getAttribute('toc');
+  if (tocAttr && items.get(tocAttr) && /\.ncx$|dtbncx/i.test(items.get(tocAttr).path + items.get(tocAttr).mt)) ncxItem = items.get(tocAttr);
+  else {
+    ncxItem = [...items.values()].find(i => /dtbncx/.test(i.mt) || /\.ncx$/i.test(i.path)) || null;
+    if (ncxItem) { found('problem', 'The NCX table of contents isn’t linked from the book’s reading order.'); spineEl.setAttribute('toc', ncxItem.id); opfDirty = true; fix('Linked the NCX table of contents from the reading order'); }
+  }
+  let ncxDoc = null, ncxTree = null;
+  if (ncxItem) { ncxDoc = analysisDoc(T.get(ncxItem.path).text, false); if (ncxDoc) ncxTree = readNcx(ncxDoc, ncxItem.path, lookupNew, true); else found('problem', 'The NCX table of contents file is malformed.'); }
+  let navItem = [...items.values()].find(i => i.props.has('nav')) || null, navDoc = null, navTree = null;
+  if (!wasV2 && !navItem) {
+    navItem = [...items.values()].find(i => /xhtml/.test(i.mt) && /<nav\b[^>]*epub:type\s*=\s*["'][^"']*\btoc\b/.test(T.get(i.path).text)) || null;
+    if (navItem) { navItem.props.add('nav'); setProps(navItem); found('problem', 'The navigation file isn’t marked as one in the package.'); fix('Marked the existing navigation file in the package'); }
+  }
+  if (navItem) { navDoc = analysisDoc(T.get(navItem.path).text, true); if (navDoc) navTree = readNav(navDoc, navItem.path, lookupNew, true); else found('problem', 'The navigation file is malformed.'); }
+  const source = validT(navTree) ? 'nav' : validT(ncxTree) ? 'ncx' : 'headings';
+  R.info.tocSource = source;
+
+  const headingsTree = () => {
+    const out = [];
+    for (const p of spine) {
+      const t = T.get(p), d = t && XHTMLX.test(p) ? analysisDoc(t.text, true) : null; if (!d) continue;
+      const h = ['h1', 'h2', 'h3'].map(x => d.getElementsByTagNameNS(NS.xhtml, x)[0]).find(Boolean);
+      let label = (h ? h.textContent : '').replace(/\s+/g, ' ').trim();
+      if (!label) { const ti = d.getElementsByTagNameNS(NS.xhtml, 'title')[0]; label = ti ? ti.textContent.replace(/\s+/g, ' ').trim() : ''; }
+      if (label && (!out.length || out[out.length - 1].label !== label)) out.push({ label: label.slice(0, 150), file: p, frag: null, kids: [] });
+    }
+    return out;
+  };
+  // problems in a tree, and a cleaned copy
+  const audit = t => { let broken = 0; const walk = ns => ns.forEach(n => { if (n.href && (!n.file || (n.frag && !idsOf(n.file).has(n.frag)))) broken++; walk(n.kids); }); walk(t || []); return { broken, order: t ? OT.outOfOrder(t) : 0 }; };
+  let dropped = 0, droppedFrag = 0;
+  const clean = ns => { const out = []; for (const n of ns) { const k = clean(n.kids);
+    if (n.href && !n.file) { dropped++; out.push(...k); continue; }
+    if (!n.href && !k.length) continue;
+    let frag = n.frag; if (n.file && frag && !idsOf(n.file).has(frag)) { frag = null; droppedFrag++; }
+    out.push({ label: n.label || 'Untitled', file: n.file || null, frag, kids: k }); } return out; };
+  let tree = source === 'nav' ? clean(navTree) : source === 'ncx' ? clean(ncxTree) : headingsTree();
+  if (source === 'headings') {
+    if (countT(ncxTree) + countT(navTree)) found('problem', 'None of the table-of-contents entries point to real places in the book.');
+    else found('problem', 'The book has no table of contents.');
+    if (tree.length) fix(`Built a table of contents from the chapter headings (${n$(tree.length, 'entry', 'entries')})`);
+    else found('warning', 'No chapter headings were found to build a table of contents from.');
+  }
+  if (dropped) fix(`Removed ${n$(dropped, 'contents entry', 'contents entries')} that pointed to missing files`);
+  if (droppedFrag) fix(`Pointed ${n$(droppedFrag, 'contents entry', 'contents entries')} with a missing anchor at the start of ${vb(droppedFrag, 'its', 'their')} chapter instead`);
+  const srcAudit = audit(source === 'nav' ? navTree : source === 'ncx' ? ncxTree : null);
+  if (srcAudit.broken) found('problem', `${n$(srcAudit.broken, 'contents entry', 'contents entries')} ${vb(srcAudit.broken, 'points', 'point')} to missing files or anchors.`);
+  let reordered = 0;
+  if (OT.outOfOrder(tree)) {
+    const k = OT.outOfOrder(tree);
+    found('problem', `${n$(k, 'contents entry', 'contents entries')} ${k === 1 ? 'is' : 'are'} out of reading order.`);
+    if (opts.order) { OT.sortT(tree); reordered = k; fix(`Put ${n$(k, 'contents entry', 'contents entries')} back in reading order`); }
+  }
+  const total = flatT(tree).length;
+  R.info.tocEntries = total;
+
+  // ---- EPUB 2 → 3
+  const props = { svg: /<(?:\w+:)?svg[\s>]/, mathml: /<(?:\w+:)?math[\s>]/, scripted: /<script[\s>]/i, 'remote-resources': /<(?:img|audio|video|source|link)\b[^>]*\s(?:src|href)\s*=\s*["']https?:/i };
+  if (wasV2) {
+    if (!opts.upgrade) found('warning', 'This is an EPUB 2 book, so it has no EPUB 3 navigation file.');
+    else {
+      progress('Upgrading to EPUB 3'); await tick();
+      pkg.setAttribute('version', '3.0');
+      const md = opf.getElementsByTagNameNS(NS.opf, 'metadata')[0];
+      const addMeta = (prop, text, refines, scheme) => { const m = opf.createElementNS(NS.opf, 'meta'); if (refines) m.setAttribute('refines', '#' + refines); m.setAttribute('property', prop); if (scheme) m.setAttribute('scheme', scheme); m.textContent = text; md.appendChild(m); };
+      const ensureId = el => el.getAttribute('id') || (el.setAttribute('id', uniqueId(el.localName)), el.getAttribute('id'));
+      const dates = [...md.children].filter(e => e.namespaceURI === NS.dc && e.localName === 'date');
+      const keepDate = dates.find(e => (e.getAttributeNS(NS.opf, 'event') || '') === 'publication') || dates[0];
+      const extraDates = dates.filter(e => e !== keepDate);
+      extraDates.forEach(e => e.parentNode.removeChild(e));
+      for (const el of [...md.children]) {
+        const role = el.getAttributeNS(NS.opf, 'role'), fileAs = el.getAttributeNS(NS.opf, 'file-as');
+        if (role) addMeta('role', role, ensureId(el), 'marc:relators');
+        if (fileAs) addMeta('file-as', fileAs, ensureId(el));
+        for (const a of [...el.attributes]) if (a.namespaceURI === NS.opf) el.removeAttributeNode(a);
+      }
+      let mod = [...md.children].find(e => e.getAttribute('property') === 'dcterms:modified');
+      if (!mod) { mod = opf.createElementNS(NS.opf, 'meta'); mod.setAttribute('property', 'dcterms:modified'); md.appendChild(mod); }
+      mod.textContent = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+      const coverMeta = [...md.children].find(e => e.localName === 'meta' && e.getAttribute('name') === 'cover');
+      const coverItem = coverMeta && (items.get(coverMeta.getAttribute('content')) || [...items.values()].find(i => i.path.endsWith(coverMeta.getAttribute('content'))));
+      if (coverItem && /^image\//.test(coverItem.mt)) { coverItem.props.add('cover-image'); setProps(coverItem); }
+      let docs = 0, skipped = 0;
+      for (const it of items.values()) {
+        if (!/xhtml/.test(it.mt)) continue;
+        const t = T.get(it.path); if (!t || t.lossy) continue;
+        for (const [k, re] of Object.entries(props)) if (re.test(t.text)) it.props.add(k);
+        if (it.props.size) setProps(it);
+        const dt = t.text.match(DOCTYPE_RE);
+        if (dt && dt[1]) { skipped++; continue; }
+        if (dt && !/^<!DOCTYPE\s+html\s*>$/i.test(dt[0])) { t.text = numericEntities(t.text).replace(DOCTYPE_RE, '<!DOCTYPE html>'); t.changed = true; docs++; }
+      }
+      opfDirty = true;
+      fix('Upgraded the book from EPUB 2 to EPUB 3, the format Kindle handles best');
+      if (extraDates.length) R.info.droppedDates = extraDates.map(e => e.textContent.trim());
+      if (skipped) found('warning', `${n$(skipped, 'chapter file')} ${vb(skipped, 'declares its own character entities and was', 'declare their own character entities and were')} left in EPUB 2 form.`);
+    }
+  }
+
+  // ---- write NCX
+  const audN = audit(ncxTree);
+  const ncxProblems = [];
+  if (ncxTree) {
+    if (audN.broken && source !== 'ncx') ncxProblems.push('broken');
+    if (source !== 'ncx' && audN.order) ncxProblems.push('order');
+    if (!countT(ncxTree) && total) ncxProblems.push('empty');
+    if (!playOrderOk(flatT(ncxTree), pos, idsOf)) { ncxProblems.push('playOrder'); found('problem', 'The NCX’s play-order numbers don’t follow the reading order, which some converters reject.'); }
+    const uidMeta = [...ncxDoc.getElementsByTagNameNS(NS.ncx, 'meta')].find(m => m.getAttribute('name') === 'dtb:uid');
+    if (!uidMeta || uidMeta.getAttribute('content').trim() !== uid) { ncxProblems.push('uid'); found('problem', 'The NCX’s book ID doesn’t match the package’s ID.'); }
+  }
+  const newFiles = [];
+  const ncxNeeded = total && (ncxDoc ? (ncxProblems.length || (source === 'ncx' && (srcAudit.broken || reordered)) || source === 'headings') : !outV3);
+  if (ncxNeeded) {
+    let path = ncxItem && ncxDoc ? ncxItem.path : null, doc = ncxItem && ncxDoc ? ncxDoc : null;
+    if (!doc) {
+      if (!ncxItem) found(wasV2 && !opts.upgrade ? 'problem' : 'warning', 'The book has no NCX table of contents (older Kindle conversions rely on it).');
+      path = ncxItem ? ncxItem.path : normPath(dirOf(opfNew) + (taken.has((dirOf(opfNew) + 'toc.ncx').toLowerCase()) ? 'toc-fixed.ncx' : 'toc.ncx'));
+      doc = parseXml(`<ncx xmlns="${NS.ncx}" version="2005-1" xml:lang="${esc(lang)}"><head/><docTitle><text>${esc(title)}</text></docTitle><navMap/></ncx>`);
+    }
+    const root = doc.documentElement, N = NS.ncx;
+    let head = kids(root, 'head')[0]; if (!head) { head = doc.createElementNS(N, 'head'); root.insertBefore(head, root.firstChild); }
+    const setMeta = (name, content) => { let m = kids(head, 'meta').find(x => x.getAttribute('name') === name); if (!m) { m = doc.createElementNS(N, 'meta'); m.setAttribute('name', name); head.appendChild(m); } m.setAttribute('content', content); };
+    setMeta('dtb:uid', uid); setMeta('dtb:depth', String(Math.max(1, depthT(tree))));
+    if (!kids(head, 'meta').some(m => m.getAttribute('name') === 'dtb:totalPageCount')) { setMeta('dtb:totalPageCount', '0'); setMeta('dtb:maxPageNumber', '0'); }
+    let navMap = kids(root, 'navMap')[0];
+    if (!navMap) { navMap = doc.createElementNS(N, 'navMap'); root.insertBefore(navMap, kids(root, 'pageList')[0] || kids(root, 'navList')[0] || null); }
+    for (const c of [...navMap.childNodes]) if (c.nodeType !== 1 || c.localName === 'navPoint') navMap.removeChild(c);
+    const used = new Set([...doc.getElementsByTagNameNS('*', '*')].map(e => e.getAttribute('id')).filter(Boolean)); let seq = 0;
+    const nid = () => { let id; do id = `navpoint-${++seq}`; while (used.has(id)); return id; };
+    const np = (n, ind) => { const t = firstTarget(n); if (!t) return '';
+      return `${ind}<navPoint id="${nid()}" playOrder="0">\n${ind}  <navLabel><text>${esc(n.label)}</text></navLabel>\n${ind}  <content src="${esc(hrefTo(path, t))}"/>\n${n.kids.map(k => np(k, ind + '  ')).join('')}${ind}</navPoint>\n`; };
+    const frag = parseXml(`<navMap xmlns="${N}">\n${tree.map(n => np(n, '    ')).join('')}  </navMap>`);
+    for (const c of [...frag.documentElement.childNodes]) navMap.appendChild(doc.importNode(c, true));
+    navMap.appendChild(doc.createTextNode('\n  '));
+    const all = [...doc.getElementsByTagNameNS(N, '*')].filter(e => ['navPoint', 'pageTarget', 'navTarget'].includes(e.localName));
+    const keyed = all.map((e, i) => { const c = kids(e, 'content')[0], tg = target(path, c ? c.getAttribute('src') : '', lookupNew, true);
+      const k = tg.file && pos.has(tg.file) ? [pos.get(tg.file), tg.frag ? (idsOf(tg.file).get(tg.frag) || 0) : 0] : [1e9, i];
+      return { e, k, id: `${tg.file}#${tg.frag}` }; });
+    const best = new Map(); for (const x of keyed) if (!best.has(x.id) || lt(x.k, best.get(x.id))) best.set(x.id, x.k);
+    const rank = new Map([...best.entries()].sort((a, b) => lt(a[1], b[1]) ? -1 : lt(b[1], a[1]) ? 1 : 0).map(([id], i) => [id, i + 1]));
+    for (const x of keyed) x.e.setAttribute('playOrder', String(rank.get(x.id)));
+    const text = XML_DECL + serialize(root) + '\n';
+    if (ncxItem && T.has(path)) Object.assign(T.get(path), { text, changed: true });
+    else {
+      T.set(path, { text, changed: true }); newFiles.push(path);
+      const el = opf.createElementNS(NS.opf, 'item'), id = uniqueId('ncx');
+      el.setAttribute('id', id); el.setAttribute('href', encodePath(relPath(opfNew, path))); el.setAttribute('media-type', 'application/x-dtbncx+xml');
+      manifestEl.appendChild(el); spineEl.setAttribute('toc', id); opfDirty = true;
+      ncxItem = { id, el, path, mt: 'application/x-dtbncx+xml', props: new Set() };
+    }
+    fix(ncxDoc ? `Rebuilt the NCX table of contents (${n$(total, 'entry', 'entries')}, numbered in reading order)` : `Added an NCX table of contents (${n$(total, 'entry', 'entries')})`);
+    R.info.ncxRebuilt = path;
+  }
+
+  // ---- write EPUB 3 navigation
+  const guideRefs = [...opf.getElementsByTagNameNS(NS.opf, 'reference')].map(r => ({ type: (r.getAttribute('type') || '').toLowerCase(), title: r.getAttribute('title') || '', ...target(opfNew, r.getAttribute('href') || '', lookupNew, true) })).filter(r => r.file && GUIDE2LM[r.type]);
+  const landmarks = from => { const seen = new Set(), li = [];
+    for (const r of guideRefs) { const t = GUIDE2LM[r.type]; if (seen.has(t)) continue; seen.add(t);
+      li.push(`      <li><a epub:type="${t}" href="${esc(hrefTo(from, r))}">${esc(r.title || t)}</a></li>`); }
+    return li.length ? `  <nav epub:type="landmarks" id="landmarks" hidden="">\n    <h2>Guide</h2>\n    <ol>\n${li.join('\n')}\n    </ol>\n  </nav>\n` : ''; };
+  if (outV3 && total) {
+    if (!navItem || !navDoc) {
+      const path = navItem ? navItem.path : normPath(dirOf(opfNew) + (taken.has((dirOf(opfNew) + 'nav.xhtml').toLowerCase()) ? 'nav-fixed.xhtml' : 'nav.xhtml'));
+      const text = `${XML_DECL}<!DOCTYPE html>\n<html xmlns="${NS.xhtml}" xmlns:epub="${NS.ops}" xml:lang="${esc(lang)}" lang="${esc(lang)}">\n<head>\n  <meta charset="utf-8"/>\n  <title>Contents</title>\n  <style>ol { list-style-type: none; }</style>\n</head>\n<body>\n  <nav epub:type="toc" id="toc">\n    <h1>Contents</h1>\n${navOl(tree, path, '    ')}  </nav>\n${landmarks(path)}</body>\n</html>\n`;
+      if (navItem) Object.assign(T.get(path), { text, changed: true });
+      else {
+        T.set(path, { text, changed: true }); newFiles.push(path);
+        const el = opf.createElementNS(NS.opf, 'item'), id = uniqueId('nav');
+        el.setAttribute('id', id); el.setAttribute('href', encodePath(relPath(opfNew, path))); el.setAttribute('media-type', 'application/xhtml+xml'); el.setAttribute('properties', 'nav');
+        manifestEl.appendChild(el); opfDirty = true;
+      }
+      if (!wasV2) found('problem', 'The book has no EPUB 3 navigation file, which Kindle uses for its table of contents.');
+      fix(`Added an EPUB 3 navigation file with all ${n$(total, 'contents entry', 'contents entries')}`);
+      R.info.navWritten = path;
+    } else {
+      const audV = audit(navTree);
+      if (audV.broken || audV.order && opts.order || !countT(navTree) || source === 'headings') {
+        if (source !== 'nav' && audV.broken) found('problem', `${n$(audV.broken, 'navigation entry', 'navigation entries')} ${vb(audV.broken, 'points', 'point')} to missing files or anchors.`);
+        const nav = tocNav(navDoc);
+        if (nav) {
+          const old = kids(nav, 'ol')[0], frag = parseXml(navOl(tree, navItem.path, '    ').replace('<ol>', `<ol xmlns="${NS.xhtml}">`), 'application/xhtml+xml');
+          const fresh = navDoc.importNode(frag.documentElement, true);
+          if (old) nav.replaceChild(fresh, old); else nav.appendChild(fresh);
+          Object.assign(T.get(navItem.path), { text: XML_DECL + '<!DOCTYPE html>\n' + serialize(navDoc.documentElement) + '\n', changed: true, dom: true });
+          fix(`Rebuilt the navigation file’s contents list (${n$(total, 'entry', 'entries')})`);
+          R.info.navRebuilt = navItem.path;
+        }
+      }
+    }
+  }
+
+  // ---- invalid nesting (div inside inline elements)
+  if (opts.nesting) {
+    progress('Checking chapter markup'); await tick();
+    let css = ''; for (const [p, t] of T) { if (CSSX.test(p)) css += t.text + '\n'; else if (XHTMLX.test(p)) for (const m of t.text.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) css += m[1] + '\n'; }
+    const guarded = cssUsesTypes(css, ['div', 'span']);
+    let els = 0, docsFixed = 0, left = 0, guardedDocs = 0;
+    for (const it of items.values()) {
+      if (!/xhtml/.test(it.mt) || it === navItem) continue;
+      const t = T.get(it.path); if (!t || t.lossy || !/<div[\s>]/i.test(t.text)) continue;
+      const doc = analysisDoc(t.text, true); if (!doc) continue;
+      const probe = nestedDivs(doc, false); left += probe.left;
+      if (!probe.fixed) continue;
+      if (guarded) { guardedDocs++; continue; }
+      const res = nestedDivs(doc, true); els += res.fixed; docsFixed++;
+      const dt = t.text.match(DOCTYPE_RE);
+      const doctype = outV3 ? '<!DOCTYPE html>\n' : dt ? dt[0] + '\n' : '';
+      Object.assign(t, { text: XML_DECL + doctype + serialize(doc.documentElement) + '\n', changed: true, dom: true });
+    }
+    if (els) { found('problem', `${n$(els, 'block')} of text ${vb(els, 'is', 'are')} nested inside inline elements (invalid HTML).`); fix(`Fixed invalid nesting in ${n$(els, 'place')} without changing how it looks`); }
+    if (guardedDocs) found('warning', `${n$(guardedDocs, 'chapter')} ${vb(guardedDocs, 'has', 'have')} blocks nested inside inline elements; left alone because the book’s styles target those elements directly.`);
+    if (left) found('warning', `${n$(left, 'block')} nested inside inline elements ${vb(left, 'contains other blocks and was left as it was', 'contain other blocks and were left as they were')}.`);
+  }
+
+  // ---- finish package & write
+  if (opfDirty) Object.assign(opfT, { text: XML_DECL + serialize(pkg) + '\n', changed: true });
+  const changedAny = !mimeOk || [...T.values()].some(t => t.changed) || newFiles.length;
+  let outBytes = bytes;
+  if (changedAny) {
+    progress('Writing the fixed book'); await tick();
+    const files = [{ name: 'mimetype', data: te.encode('application/epub+zip'), store: true }], seen = new Set(['mimetype']);
+    const enc = t => { let s = t.text; if (t.enc && t.enc !== 'utf-8' && t.enc !== 'utf8') s = s.replace(/^(\s*<\?xml[^>]*encoding\s*=\s*["'])[^"']+/i, '$1utf-8').replace(/^(\s*@charset\s+["'])[^"']+/i, '$1utf-8'); return te.encode(s); };
+    const pushName = nn => {
+      if (seen.has(nn)) return; seen.add(nn);
+      const t = T.get(nn), old = t ? t.old : [...renames].find(([, v]) => v === nn)?.[0] || nn, f = F.get(old);
+      if (t && (t.changed || !f)) files.push({ name: nn, data: enc(t) });
+      else if (f) files.push({ name: nn, data: f.data, reuse: f.crcOk && (f.entry.method === 0 || f.entry.method === 8) ? { method: f.entry.method, raw: f.entry.raw, crc: f.entry.crc, usize: f.entry.usize } : null });
+    };
+    pushName('META-INF/container.xml');
+    for (const n of orig.order) if (n !== 'mimetype' && !(containerFix && n === contName)) pushName(newName(n));
+    for (const p of newFiles) pushName(p);
+    outBytes = await writeZip(files);
+  }
+
+  // ---- verify
+  progress('Verifying the result against the original'); await tick();
+  R.checks = await verify(orig, outBytes, { renames, opfOld, outV3, navRebuilt: R.info.navRebuilt, navWritten: R.info.navWritten, source, opts, droppedDates: R.info.droppedDates || [] });
+  R.changed = !!changedAny;
+  R.output = outBytes;
+  R.verdict = R.checks.some(c => c.s === 'fail') ? 'failed' : !changedAny ? 'clean' : 'fixed';
+  return R;
+}
+
+/* ================= verification ================= */
+async function verify(orig, outBytes, P) {
+  const C = [], add = (s, title, detail = '') => C.push({ s, title, detail });
+  let out;
+  try { out = await loadBook(outBytes); } catch (e) { add('fail', 'The output can’t be opened as an EPUB', e.message); return C; }
+  const OF = orig.files, NF = out.files;
+  const inv = new Map([...P.renames].map(([o, n]) => [n, o])), back = n => inv.get(n) || n, fwd = n => P.renames.get(n) || n;
+  const lookupO = makeLookup(orig.order), lookupN = makeLookup(out.order);
+
+  // 1 archive
+  const e0 = out.entries[0], crcBad = [...NF.values()].filter(f => !f.crcOk).length;
+  if (e0 && e0.name === 'mimetype' && e0.method === 0 && new TextDecoder().decode(e0.raw) === 'application/epub+zip' && !crcBad)
+    add('pass', 'The archive is a valid EPUB container', `“mimetype” comes first, uncompressed; all ${n$(out.order.length, 'file')} pass their checksums.`);
+  else add('fail', 'The archive structure is wrong', crcBad ? `${crcBad} files fail their checksum.` : '“mimetype” isn’t first or is compressed.');
+
+  // 2 package
+  const cont = NF.get('META-INF/container.xml'), fp = cont && (cont.text.match(/full-path\s*=\s*["']([^"']+)["']/) || [])[1];
+  const opfName = fp && lookupN(xmlUnesc(fp), true) && xmlUnesc(fp), opf = opfName && analysisDoc(NF.get(opfName).text, false);
+  if (!opf) { add('fail', 'The package file can’t be found or read'); return C; }
+  const items = new Map(); let miss = 0;
+  for (const el of opf.getElementsByTagNameNS(NS.opf, 'item')) { const h = lookupN(resolvePath(opfName, el.getAttribute('href') || ''), true); if (!h) miss++; else items.set(el.getAttribute('id'), { path: h.name, mt: el.getAttribute('media-type') || '', props: el.getAttribute('properties') || '' }); }
+  const unsafe = out.order.filter(n => !isMetaInf(n) && !n.split('/').every(safeSeg));
+  if (!miss && !unsafe.length) add('pass', 'Every listed file exists under a plain name', `${n$(items.size, 'manifest entry', 'manifest entries')} match their files exactly.`);
+  else add('fail', 'Some listed files don’t match', `${miss} missing, ${unsafe.length} with unusual characters.`);
+
+  // 3 links
+  const idsN = idCacheFor(p => NF.get(p) && NF.get(p).text), idsO = idCacheFor(p => OF.get(p) && OF.get(p).text);
+  const preBroken = new Set();
+  for (const n of orig.order) { const f = OF.get(n); if (f.kind === 'binary' || isMetaInf(n) || f.lossy) continue;
+    const rec = v => { if (!v || isExternal(v)) return null; const [p] = splitRef(v); const tg = target(n, p ? v : n + v, lookupO, false);
+      if (!tg.file) preBroken.add(`${n}|${v}`); else if (tg.frag && !idsO(tg.file).has(tg.frag)) preBroken.add(`#${tg.file}#${tg.frag}`); return null; };
+    f.kind === 'css' ? rewriteCss(f.text, rec) : rewriteMarkup(f.text, rec); }
+  let links = 0, broken = 0, old = 0;
+  for (const n of out.order) { const f = NF.get(n); if (f.kind === 'binary' || isMetaInf(n) || f.lossy) continue;
+    const rec = v => { if (!v || isExternal(v)) return null; links++; const [p] = splitRef(v); const tg = target(n, p ? v : n + v, lookupN, true);
+      if (!tg.file) preBroken.has(`${back(n)}|${v}`) ? old++ : broken++;
+      else if (tg.frag && !idsN(tg.file).has(tg.frag)) preBroken.has(`#${back(tg.file)}#${tg.frag}`) ? old++ : broken++;
+      return null; };
+    f.kind === 'css' ? rewriteCss(f.text, rec) : rewriteMarkup(f.text, rec); }
+  if (broken) add('fail', `${n$(broken, 'link')} ${vb(broken, 'doesn’t', 'don’t')} resolve`, 'They worked in the original but not in the output.');
+  else add(old ? 'warn' : 'pass', `All ${n$(links - old, 'internal link')} resolve exactly`, old ? `${n$(old, 'link')} that ${vb(old, 'was already broken in the original stays as it was', 'were already broken in the original stay as they were')}.` : 'Every link and anchor points to a file and a spot that exist, spelled exactly as the file is named.');
+
+  // 4 table of contents
+  const spineEl = opf.getElementsByTagNameNS(NS.opf, 'spine')[0];
+  const spine = [...opf.getElementsByTagNameNS(NS.opf, 'itemref')].map(r => items.get(r.getAttribute('idref'))).filter(Boolean).map(i => i.path);
+  const pos = new Map(spine.map((p, i) => [p, i])), OT = orderTools(pos, idsN);
+  const uidEl = [...opf.getElementsByTagNameNS(NS.dc, 'identifier')].find(e => e.getAttribute('id') === opf.documentElement.getAttribute('unique-identifier'));
+  const ncxI = items.get(spineEl.getAttribute('toc') || '');
+  const ncxDoc = ncxI && analysisDoc(NF.get(ncxI.path).text, false), ncxT = ncxDoc ? readNcx(ncxDoc, ncxI.path, lookupN, true) : null;
+  const navI = [...items.values()].find(i => /\bnav\b/.test(i.props)), navDoc = navI && analysisDoc(NF.get(navI.path).text, true), navT = navDoc ? readNav(navDoc, navI.path, lookupN, true) : null;
+  const tocOk = t => flatT(t).every(n => !n.href || (n.file && (!n.frag || idsN(n.file).has(n.frag))));
+  if (ncxT) {
+    const flat = flatT(ncxT), seqOk = playOrderOk(flat, pos, idsN);
+    const uidM = [...ncxDoc.getElementsByTagNameNS(NS.ncx, 'meta')].find(m => m.getAttribute('name') === 'dtb:uid');
+    const good = flat.length && tocOk(ncxT) && seqOk && uidM && uidEl && uidM.getAttribute('content').trim() === uidEl.textContent.trim();
+    add(good ? 'pass' : 'fail', good ? `NCX table of contents: ${n$(flat.length, 'entry', 'entries')}, all working` : 'The NCX table of contents still has problems', good ? 'Linked from the reading order, numbered in sequence, every entry points to a real place.' : 'Broken entries, numbering or book ID.');
+  } else add(P.outV3 ? 'pass' : 'fail', P.outV3 ? 'No NCX file, which EPUB 3 doesn’t need' : 'No NCX table of contents', P.outV3 ? 'The navigation file below is what Kindle reads.' : 'An EPUB 2 book needs one.');
+  if (P.outV3) {
+    const good = navT && countT(navT) && tocOk(navT);
+    add(good ? 'pass' : 'fail', good ? `EPUB 3 navigation file: ${n$(countT(navT), 'entry', 'entries')}, all working` : 'The EPUB 3 navigation file is missing or broken');
+  }
+  const ord = OT.outOfOrder(navT || ncxT || []);
+  if (navT || ncxT) add(ord ? (P.opts.order ? 'fail' : 'warn') : 'pass', ord ? `${n$(ord, 'contents entry', 'contents entries')} out of reading order` : 'Contents entries follow the reading order');
+
+  // entries kept
+  const oOpfDoc = analysisDoc(OF.get(P.opfOld).text, false);
+  const oItems = new Map([...oOpfDoc.getElementsByTagNameNS(NS.opf, 'item')].map(el => { const h = lookupO(resolvePath(P.opfOld, el.getAttribute('href') || '')); return [el.getAttribute('id'), h ? { path: h.name, props: el.getAttribute('properties') || '', mt: el.getAttribute('media-type') || '' } : null]; }));
+  const oSpineEl = oOpfDoc.getElementsByTagNameNS(NS.opf, 'spine')[0];
+  if (P.source !== 'headings') {
+    let oT = null;
+    if (P.source === 'nav') { const i = [...oItems.values()].find(i => i && /\bnav\b/.test(i.props)); const d = i && analysisDoc(OF.get(i.path).text, true); oT = d && readNav(d, i.path, lookupO, false); }
+    else { const i = oItems.get(oSpineEl.getAttribute('toc') || '') || [...oItems.values()].find(i => i && /dtbncx/.test(i.mt)); const d = i && analysisDoc(OF.get(i.path).text, false); oT = d && readNcx(d, i.path, lookupO, false); }
+    const keyset = (t, mapF, ids) => { const m = new Map(); for (const n of flatT(t)) if (n.file) { const f = mapF(n.file), fr = n.frag && ids(n.file).has(n.frag) ? n.frag : ''; const k = `${n.label}|${f}|${fr}`; m.set(k, (m.get(k) || 0) + 1); } return m; };
+    const want = keyset(oT, fwd, idsO), wantN = [...want.values()].reduce((a, b) => a + b, 0);
+    const lost = t => { if (!t) return wantN; const have = keyset(t, x => x, idsN); let l = 0; for (const [k, c] of want) l += Math.max(0, c - (have.get(k) || 0)); return l; };
+    const lostN = Math.max(ncxT ? lost(ncxT) : 0, P.outV3 ? lost(navT) : 0);
+    add(lostN ? 'fail' : 'pass', lostN ? `${n$(lostN, 'contents entry', 'contents entries')} from the original ${vb(lostN, 'is', 'are')} missing` : `All ${n$(wantN, 'contents entry', 'contents entries')} from the original are kept`, lostN ? '' : 'Same names, same destinations.');
+  } else add('warn', 'Table of contents was generated from chapter headings', 'The original had no usable table of contents to compare against.');
+
+  // 5 reading order
+  const oSpine = [...oOpfDoc.getElementsByTagNameNS(NS.opf, 'itemref')].map(r => oItems.get(r.getAttribute('idref'))).filter(Boolean).map(i => fwd(i.path));
+  const sameSpine = oSpine.length === spine.length && oSpine.every((p, i) => p === spine[i]);
+  add(sameSpine ? 'pass' : 'fail', sameSpine ? `Reading order unchanged (${n$(spine.length, 'section')})` : 'The reading order changed');
+
+  // 6 documents: text and markup
+  const env = { link: 0, nest: 0, other: [] };
+  const sameRef = (vo, vn, fo, fn) => {
+    if (vo === vn && (isExternal(vo) || vo[0] === '#')) return true;
+    const [po, so] = splitRef(vo), [pn, sn] = splitRef(vn); if (so !== sn || !po !== !pn) return false; if (!po) return true;
+    const ho = lookupO(resolvePath(fo, po)), hn = lookupN(resolvePath(fn, pn), true);
+    return !ho || !hn ? vo === vn : back(hn.name) === ho.name;
+  };
+  const normCss = (css, f, lk, strict, map) => rewriteCss(css, v => { const [p, s] = splitRef(v); const h = p && lk(resolvePath(f, p), strict); return h ? '@' + map(h.name) + s : '@?' + v; });
+  const cmp = (a, b, fo, fn, path) => {
+    let nested = false;
+    if (a.localName !== b.localName || a.namespaceURI !== b.namespaceURI) {
+      if (a.localName === 'div' && b.localName === 'span' && /display:\s*block\s*$/.test(b.getAttribute('style') || '')) { nested = true; env.nest++; }
+      else { env.other.push(`${fn}: <${a.localName}> became <${b.localName}>`); return; }
+    }
+    const attrs = el => new Map([...el.attributes].filter(x => x.namespaceURI !== NS.xmlns).map(x => [(x.namespaceURI || '') + '|' + x.localName, x.value]));
+    const A = attrs(a), B = attrs(b);
+    for (const k of new Set([...A.keys(), ...B.keys()])) {
+      const va = A.get(k), vb = B.get(k); if (va === vb) continue; const name = k.split('|')[1];
+      if (va != null && vb != null && isRefAttr(name.toLowerCase()) && sameRef(va, vb, fo, fn)) { env.link++; continue; }
+      if (name === 'style') {
+        const base = nested ? (vb || '').replace(/(;\s*)?display:\s*block\s*$/, '') : vb || '';
+        const va2 = (va || '').trim().replace(/;\s*$/, '');
+        if (base.trim() === va2 || normCss(va2, fo, lookupO, false, x => x) === normCss(base.trim(), fn, lookupN, true, back)) continue;
+      }
+      env.other.push(`${fn}: attribute ${name} changed on <${b.localName}>`);
+    }
+    const seq = el => { const o = []; let s = ''; for (const c of el.childNodes) { if (c.nodeType === 1) { o.push(s, c); s = ''; } else if (c.nodeType === 3 || c.nodeType === 4) s += c.data; } o.push(s); return o; };
+    const x = seq(a), y = seq(b);
+    if (x.length !== y.length) { env.other.push(`${fn}: element structure changed inside <${b.localName}>`); return; }
+    for (let i = 0; i < x.length; i++) {
+      if (typeof x[i] === 'string') { if (x[i] !== y[i]) { env.other.push(`${fn}: text changed`); return; } }
+      else cmp(x[i], y[i], fo, fn);
+    }
+  };
+  let docs = 0, textSame = 0, chars = 0, words = 0, unparsed = 0; const textDiff = [];
+  const skipDoc = new Set([P.navRebuilt && back(P.navRebuilt)].filter(Boolean));
+  for (const n of orig.order) {
+    const f = OF.get(n); if (!XHTMLX.test(n) || isMetaInf(n) || skipDoc.has(n)) continue;
+    const g = NF.get(fwd(n)); docs++;
+    if (!g) { textDiff.push(n); continue; }
+    const da = analysisDoc(f.text, true), db = analysisDoc(g.text, true);
+    if (!da || !db) {
+      unparsed++;
+      const h = s => new DOMParser().parseFromString(s, 'text/html').body.textContent;
+      if (h(f.text) === h(g.text)) textSame++; else textDiff.push(n); continue;
+    }
+    const ba = da.getElementsByTagNameNS(NS.xhtml, 'body')[0] || da.documentElement, bb = db.getElementsByTagNameNS(NS.xhtml, 'body')[0] || db.documentElement;
+    const ta = ba.textContent, tb = bb.textContent; chars += ta.length; words += (ta.match(/\S+/g) || []).length;
+    if (ta === tb) textSame++; else textDiff.push(n);
+    cmp(ba, bb, n, fwd(n));
+    const heads = (d, fl, lk, strict, map) => [...d.getElementsByTagNameNS(NS.xhtml, 'link')].map(l => { const h = lk(resolvePath(fl, splitRef(l.getAttribute('href') || '')[0]), strict); return h ? map(h.name) : l.getAttribute('href'); }).join('|') + '|' + ((d.getElementsByTagNameNS(NS.xhtml, 'title')[0] || {}).textContent || '');
+    if (heads(da, n, lookupO, false, x => x) !== heads(db, fwd(n), lookupN, true, back)) env.other.push(`${fwd(n)}: stylesheet links or page title changed`);
+  }
+  add(textDiff.length ? 'fail' : 'pass', textDiff.length ? `Text differs in ${n$(textDiff.length, 'document')}` : `Text identical in all ${n$(docs, 'document')}`,
+    textDiff.length ? textDiff.slice(0, 5).join(', ') : `Compared character for character: ${chars.toLocaleString('en')} characters, about ${words.toLocaleString('en')} words.${unparsed ? ` ${unparsed} malformed files compared as plain text.` : ''}${skipDoc.size ? ' The rebuilt navigation file is covered by the contents checks.' : ''}`);
+  const expl = [env.link && `${n$(env.link, 'link')} updated to the new file names`, env.nest && `${n$(env.nest, 'nesting fix', 'nesting fixes')}`].filter(Boolean).join(' and ');
+  add(env.other.length ? 'fail' : 'pass', env.other.length ? `${n$(env.other.length, 'unexpected markup change')}` : 'Formatting and markup unchanged', env.other.length ? env.other.slice(0, 4).join('; ') : expl ? `Every element and attribute compared; the only differences are ${expl}.` : 'Every element and attribute compared.');
+
+  // 7 images, fonts, other binary files; 8 stylesheets; 9 other markup
+  let bin = 0, binSame = 0, css = 0, cssSame = 0, svg = 0, svgSame = 0;
+  for (const n of orig.order) {
+    const f = OF.get(n), g = NF.get(fwd(n));
+    if (n === 'mimetype' || /^META-INF\/(container|encryption)\.xml$/i.test(n) || n === P.opfOld) continue;
+    if (f.kind === 'binary' || (isMetaInf(n))) { bin++; if (g && g.data.length === f.data.length && g.data.every((b, i) => b === f.data[i])) binSame++; }
+    else if (f.kind === 'css') { css++; if (g && normCss(f.text, n, lookupO, false, x => x) === normCss(g.text, fwd(n), lookupN, true, back)) cssSame++; }
+    else if (/\.(svg|smil)$/i.test(n)) { svg++; const da = analysisDoc(f.text, false), db = g && analysisDoc(g.text, false); const before = env.other.length; if (da && db && da.documentElement.textContent === db.documentElement.textContent) { cmp(da.documentElement, db.documentElement, n, fwd(n)); if (env.other.length === before) svgSame++; } }
+  }
+  if (bin) add(binSame === bin ? 'pass' : 'fail', binSame === bin ? `Images and other files byte-for-byte identical (${bin})` : `${n$(bin - binSame, 'image or other file', 'images or other files')} changed`);
+  if (css) add(cssSame === css ? 'pass' : 'fail', cssSame === css ? `Stylesheets unchanged (${css})` : `${css - cssSame} stylesheets changed`, cssSame === css ? 'Identical apart from any file links they contain.' : '');
+  if (svg) add(svgSame === svg ? 'pass' : 'fail', svgSame === svg ? `SVG/SMIL files unchanged (${svg})` : `${svg - svgSame} SVG/SMIL files changed`);
+
+  // 10 metadata
+  const mdVals = (d, uidAttr) => { const o = {}; for (const t of ['title', 'creator', 'language', 'publisher', 'subject', 'description', 'rights']) o[t] = [...d.getElementsByTagNameNS(NS.dc, t)].map(e => e.textContent.trim()).sort().join(' | ');
+    const u = [...d.getElementsByTagNameNS(NS.dc, 'identifier')].find(e => e.getAttribute('id') === d.documentElement.getAttribute(uidAttr)); o.identifier = u ? u.textContent.trim() : ''; return o; };
+  const mo = mdVals(oOpfDoc, 'unique-identifier'), mn = mdVals(opf, 'unique-identifier');
+  const mdDiff = Object.keys(mo).filter(k => mo[k] !== mn[k]);
+  add(mdDiff.length ? 'fail' : 'pass', mdDiff.length ? `Metadata changed: ${mdDiff.join(', ')}` : 'Title, author, language, publisher, description and ID unchanged',
+    P.droppedDates.length ? `Only the main publication date is kept, as EPUB 3 requires. Dropped: ${P.droppedDates.join(', ')}.` : '');
+
+  // 11 nothing lost
+  const lostFiles = orig.order.filter(n => !NF.has(fwd(n)) && !(n === 'META-INF/container.xml' || /^meta-inf\/container\.xml$/i.test(n)));
+  add(lostFiles.length ? 'fail' : 'pass', lostFiles.length ? `${n$(lostFiles.length, 'file')} from the original ${vb(lostFiles.length, 'is', 'are')} missing` : `All ${n$(orig.order.length, 'file')} from the original are present`, lostFiles.slice(0, 5).join(', '));
+  return C;
+}
+
+return { process, FixError };
+})();
+if (typeof window !== 'undefined') window.EpubFixer = EpubFixer;
+
+</script>
+<script>
+{
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const opts = { upgrade: true, order: true, nesting: true };
+  try { Object.assign(opts, JSON.parse(localStorage.getItem('epubfixer-opts') || '{}')); } catch (e) {}
+  for (const k of Object.keys(opts)) {
+    const el = $('#opt-' + k); el.checked = !!opts[k];
+    el.addEventListener('change', () => { opts[k] = el.checked; try { localStorage.setItem('epubfixer-opts', JSON.stringify(opts)); } catch (e) {} });
+  }
+  const dlReady = (async () => { try { return window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) { return null; } })();
+  const mb = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  const outName = name => name.replace(/\.epub$/i, '').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 200) + ' (fixed).epub';
+
+  async function save(name, bytes, msg) {
+    const blob = new Blob([bytes], { type: 'application/epub+zip' });
+    const d = await dlReady;
+    if (d) {
+      try { await d.save({ filename: name, data: blob }); msg.textContent = 'Saved.'; return; }
+      catch (e) {
+        const code = e && e.code;
+        if (code === 'declined') { msg.textContent = 'Download cancelled.'; return; }
+        if (code === 'rate_limited') { msg.textContent = 'Another download prompt is open. Try again in a moment.'; return; }
+        if (code === 'too_large') { msg.textContent = 'This file is too large to save here.'; return; }
+      }
+    }
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    msg.textContent = 'Download started. If nothing appears, open this page on claude.ai and try again.';
+  }
+
+  const li = (cls, mark, text, detail) => `<li><span class="mk ${cls}" aria-hidden="true">${mark}</span><span>${esc(text)}${detail ? `<em>${esc(detail)}</em>` : ''}</span></li>`;
+  const list = (items, empty) => items.length ? `<ul>${items.join('')}</ul>` : `<p class="none">${empty}</p>`;
+
+  function render(el, file, r) {
+    const fails = r.checks.filter(c => c.s === 'fail').length;
+    const problems = r.found.filter(f => f.sev === 'problem').length;
+    el.className = 'card ' + r.verdict;
+    const state = { fixed: 'Fixed and verified', clean: 'No changes needed', failed: 'Check failed' }[r.verdict];
+    const verdict = {
+      fixed: `${problems ? `Fixed ${problems} ${problems === 1 ? 'problem' : 'problems'}` : 'Updated'} and verified. The book is ready for Send to Kindle.`,
+      clean: 'No problems found. This book is ready for Send to Kindle as it is.',
+      failed: `Fixed, but ${fails} ${fails === 1 ? 'check' : 'checks'} found differences from the original. Look below before using it.`
+    }[r.verdict];
+    const facts = [`EPUB ${r.info.version}${r.changed && r.info.version.startsWith('2') && opts.upgrade ? ' → 3.0' : ''}`, r.info.tocEntries ? `${r.info.tocEntries.toLocaleString('en')} contents entries` : 'no contents entries', mb(file.size) + (r.changed ? ` → ${mb(r.output.length)}` : '')];
+    el.querySelector('.state').textContent = state;
+    el.querySelector('.body').innerHTML = `
+      <p class="verdict">${esc(verdict)}</p>
+      <p class="facts">${esc(facts.join(' · '))}</p>
+      <div class="cols">
+        <div class="col"><h4>Found</h4>${list(r.found.map(f => li(f.sev === 'problem' ? 'p' : 'w', f.sev === 'problem' ? '!' : 'i', f.text)), 'Nothing wrong.')}</div>
+        <div class="col"><h4>Fixed</h4>${list(r.fixes.map(t => li('f', '+', t)), 'Nothing needed fixing.')}</div>
+        <div class="col"><h4>Checked</h4>${list(r.checks.map(c => li(c.s === 'pass' ? 'ok' : c.s === 'warn' ? 'w' : 'no', c.s === 'pass' ? '✓' : c.s === 'warn' ? 'i' : '✗', c.title, c.detail)), '')}</div>
+      </div>
+      ${r.changed ? `<div class="save"><button type="button" class="btn${r.verdict === 'failed' ? ' ghost' : ''}">${r.verdict === 'failed' ? 'Download anyway' : 'Download fixed EPUB'}</button><span class="msg">${esc(outName(file.name))}</span></div>` : ''}`;
+    const btn = el.querySelector('.save .btn');
+    if (btn) btn.addEventListener('click', () => save(outName(file.name), r.output, el.querySelector('.save .msg')));
+  }
+
+  let queue = Promise.resolve();
+  function handle(files) {
+    for (const file of files) {
+      const el = document.createElement('article');
+      el.className = 'card';
+      el.innerHTML = `<header class="strip"><h3>${esc(file.name)}</h3><span class="state">Waiting</span></header><div class="body"><p class="progress">Waiting for the previous book</p></div>`;
+      $('#results').prepend(el);
+      queue = queue.then(async () => {
+        el.querySelector('.state').textContent = 'Working';
+        const prog = t => { const p = el.querySelector('.progress'); if (p) p.textContent = t + '…'; };
+        try {
+          const buf = new Uint8Array(await file.arrayBuffer());
+          const r = await EpubFixer.process(buf, { ...opts }, prog);
+          render(el, file, r);
+        } catch (e) {
+          el.className = 'card error';
+          el.querySelector('.state').textContent = 'Can’t fix this file';
+          const known = e instanceof EpubFixer.FixError;
+          el.querySelector('.body').innerHTML = `<p class="errtext">${esc(known ? e.message : 'Something went wrong while reading this file: ' + (e && e.message || e))}</p>`;
+        }
+      });
+    }
+  }
+
+  const drop = $('#drop'), input = $('#file');
+  input.addEventListener('change', () => { if (input.files.length) handle([...input.files]); input.value = ''; });
+  drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+  for (const t of ['dragenter', 'dragover']) drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); });
+  for (const t of ['dragleave', 'drop']) drop.addEventListener(t, () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); const f = [...(e.dataTransfer && e.dataTransfer.files || [])]; if (f.length) handle(f); });
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+}
+</script>
+</body>
+</html>
