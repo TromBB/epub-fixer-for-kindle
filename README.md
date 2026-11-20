@@ -2,7 +2,7 @@
 
 A single-page web app that repairs the problems that make **Send to Kindle** drop an EPUB's table of contents, then verifies the result against the original.
 
-**Use it:** open the GitHub Pages site for this repository and drop in one or more `.epub` files. Everything runs in your browser, so books are never uploaded anywhere.
+**Use it:** open **https://trombb.github.io/epub-fixer-for-kindle/** and drop in one or more `.epub` files. Everything runs in your browser, so books are never uploaded anywhere.
 
 ## What it fixes
 
